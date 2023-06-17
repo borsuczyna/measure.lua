@@ -2482,11 +2482,11 @@ local function renderMeasure()
 Call time: ' .. data.callTime .. 'ms \
 Start: ' .. data.start .. 'ms \
 End: ' .. data.start + data.callTime .. 'ms \
-Input: ' .. data.args .. ' \
-Output: ' .. data.result .. '\
 Total calls: ' .. measure.totals[data.name] .. '\
 Average call time: ' .. measure.averages[data.name] .. '\
-Total call time: ' .. measure.totals[data.name] .. 'ms / ' .. measure.recordTime .. 'ms', menu[1] + 6, ty + th + 5, menu[1] + menu[3] - 12, menu[2] + menu[4] - 5, 0x99FFFFFF, 1, font, 'left', 'top', true)
+Total call time: ' .. measure.totals[data.name] .. 'ms / ' .. measure.recordTime .. 'ms \
+Input: ' .. data.args .. ' \
+Output: ' .. data.result, menu[1] + 6, ty + th + 5, menu[1] + menu[3] - 12, menu[2] + menu[4] - 5, 0x99FFFFFF, 1, font, 'left', 'top', true)
     end
     elseif not measure.recording then
         local y = 0
@@ -2606,25 +2606,29 @@ function recordMeasure(ignore)
         rows = 1
     }
 
-    local function hookFunction(original, path)
+    local function hookFunction(original, path, noSelf)
         local prev = original
         measure.originals[path] = prev
         return function(...)
-            local id = functionCallStart(path, ...)
+            local args = {...}
+            if noSelf then
+                table.remove(args, 1)
+            end
+            local id = functionCallStart(path, unpack(args))
             local result = {prev(...)}
             functionCallEnd(id, result)
             return unpack(result)
         end
     end
 
-    local function scanTable(tbl, path)
+    local function scanTable(tbl, path, noSelf)
         for name,callback in pairs(tbl) do
             if type(name) == 'string' then
                 local path = path .. '.' .. name
                 if type(callback) == 'function' and not tableIncludes(ignore, path) and not tableIncludes(ignoredFunctions, path) then
-                    tbl[name] = hookFunction(callback, path)
+                    tbl[name] = hookFunction(callback, path, noSelf)
                 elseif name == 'prototype' then
-                    scanTable(callback, path)
+                    scanTable(callback, path, true)
                 end
             end
         end
@@ -2636,7 +2640,7 @@ function recordMeasure(ignore)
         if type(callback) == 'function' and not tableIncludes(ignore, path) and not tableIncludes(ignoredFunctions, path) then
             _G[name] = hookFunction(_G[name], path)
         elseif type(callback) == 'table' and name ~= '_G' then
-            scanTable(callback, path)
+            scanTable(callback, path, false)
         end
     end
 
@@ -2682,7 +2686,13 @@ function stopRecordingMeasure()
     end)
 
     for name,callback in pairs(measure.originals) do
-        _G[name] = callback
+        -- if there is . split it into table
+        local path = split(name, '.')
+        local tbl = _G
+        for i = 1, #path - 1 do
+            tbl = tbl[path[i]]
+        end
+        tbl[path[#path]] = callback
     end
 
     measure.recordTime = (getTickCount() - measure.recordStart)
